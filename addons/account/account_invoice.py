@@ -1480,6 +1480,18 @@ class account_invoice_tax(models.Model):
         self.factor_base = self.base_amount / self.base if self.base else 1.0
         self.factor_tax = self.tax_amount / self.amount if self.amount else 1.0
 
+    @api.depends('name', 'tax_code_id')
+    def _get_account_tax_id(self):
+        """
+        As account.invoice.tax does not have direct link to account.tax
+        I retrieve it by name and tax code
+        """
+        tax = self.env['account.tax'].search([
+            ('tax_code_id', '=', self.tax_code_id.id),
+            ('name', '=', self.name)
+            ])
+        self.account_tax_id = tax.id
+
     invoice_id = fields.Many2one('account.invoice', string='Invoice Line',
         ondelete='cascade', index=True)
     name = fields.Char(string='Tax Description',
@@ -1507,6 +1519,8 @@ class account_invoice_tax(models.Model):
         compute='_compute_factors')
     factor_tax = fields.Float(string='Multipication factor Tax code',
         compute='_compute_factors')
+    account_tax_id = fields.Many2one(
+        'account.tax', string='Tax', compute=_get_account_tax_id)
 
     @api.multi
     def base_change(self, base, currency_id=False, company_id=False, date_invoice=False):
@@ -1516,6 +1530,10 @@ class account_invoice_tax(models.Model):
             currency = self.env['res.currency'].browse(currency_id)
             currency = currency.with_context(date=date_invoice or fields.Date.context_today(self))
             base = currency.compute(base * factor, company.currency_id, round=False)
+            if self.invoice_id.type in ('out_invoice','in_invoice'):
+                base = base * self.account_tax_id.base_sign
+            else:
+                base = base * self.account_tax_id.ref_base_sign
         return {'value': {'base_amount': base}}
 
     @api.multi
@@ -1525,6 +1543,10 @@ class account_invoice_tax(models.Model):
             currency = self.env['res.currency'].browse(currency_id)
             currency = currency.with_context(date=date_invoice or fields.Date.context_today(self))
             amount = currency.compute(amount, company.currency_id, round=False)
+            if self.invoice_id.type in ('out_invoice','in_invoice'):
+                amount = amount * self.account_tax_id.tax_sign
+            else:
+                amount = amount * self.account_tax_id.ref_tax_sign
         return {'value': {'tax_amount': amount}}
 
     @api.v8
